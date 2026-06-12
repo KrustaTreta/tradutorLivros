@@ -1,3 +1,5 @@
 streamlit
-pypdf
 deep-translator
+pymupdf
+pytesseract
+Pillow

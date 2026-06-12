@@ -3,6 +3,7 @@ from pypdf import PdfReader
 from deep_translator import GoogleTranslator
 import math
 import time
+import io  # <--- ADICIONE ESTA IMPORTAÇÃO AQUI
 
 # Configuração da página
 st.set_page_config(
@@ -18,19 +19,20 @@ st.markdown("Otimizado para PDFs grandes e pesados. O livro foi segmentado para 
 st.sidebar.header("📁 Upload do Livro")
 uploaded_file = st.sidebar.file_uploader("Escolha o arquivo PDF", type=["pdf"])
 
-# --- FUNÇÕES AUXILIARES OTIMIZADAS (Usando PyPDF para velocidade) ---
+# --- FUNÇÕES AUXILIARES OTIMIZADAS (Corrigidas com BytesIO) ---
 @st.cache_data(show_spinner="Analisando estrutura do PDF...")
 def analisar_pdf_rapido(file_bytes):
-    """Abre o arquivo na memória uma única vez, conta páginas e extrai metadados."""
-    reader = PdfReader(file_bytes)
+    """Envelopa os bytes em BytesIO para permitir a leitura correta pelo PyPDF."""
+    stream = io.BytesIO(file_bytes)  # <--- CORREÇÃO AQUI
+    reader = PdfReader(stream)
     return len(reader.pages)
 
 def extrair_texto_pypdf(file_bytes, pagina_inicio, pagina_fim):
-    """Extração de alta performance para blocos específicos."""
-    reader = PdfReader(file_bytes)
+    """Extração de alta performance usando fluxo de dados em memória."""
+    stream = io.BytesIO(file_bytes)  # <--- CORREÇÃO AQUI
+    reader = PdfReader(stream)
     paginas_texto = []
     
-    # Índices ajustados para 0-indexed do PyPDF
     for idx in range(pagina_inicio - 1, min(pagina_fim, len(reader.pages))):
         try:
             pagina = reader.pages[idx]

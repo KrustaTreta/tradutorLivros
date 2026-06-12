@@ -3,47 +3,78 @@ from pypdf import PdfReader
 from deep_translator import GoogleTranslator
 import math
 import time
-import io  # <--- ADICIONE ESTA IMPORTAÇÃO AQUI
+import io
 
 # Configuração da página
 st.set_page_config(
-    page_title="Extrator & Tradutor - Alta Performance",
+    page_title="Extrator & Tradutor com Imagens",
     page_icon="📚",
     layout="wide"
 )
 
-st.title("📚 Extrator e Tradutor de Livros (Otimizado)")
-st.markdown("Otimizado para PDFs grandes e pesados. O livro foi segmentado para garantir estabilidade.")
+st.title("📚 Extrator, Tradutor e Visualizador de Imagens de Livros")
+st.markdown("Otimizado para PDFs pesados. Agora com extração automática de textos e imagens da página atual.")
 
 # --- BARRA LATERAL ---
 st.sidebar.header("📁 Upload do Livro")
 uploaded_file = st.sidebar.file_uploader("Escolha o arquivo PDF", type=["pdf"])
 
-# --- FUNÇÕES AUXILIARES OTIMIZADAS (Corrigidas com BytesIO) ---
+# --- FUNÇÕES AUXILIARES OTIMIZADAS ---
 @st.cache_data(show_spinner="Analisando estrutura do PDF...")
 def analisar_pdf_rapido(file_bytes):
-    """Envelopa os bytes em BytesIO para permitir a leitura correta pelo PyPDF."""
-    stream = io.BytesIO(file_bytes)  # <--- CORREÇÃO AQUI
+    stream = io.BytesIO(file_bytes)
     reader = PdfReader(stream)
     return len(reader.pages)
 
-def extrair_texto_pypdf(file_bytes, pagina_inicio, pagina_fim):
-    """Extração de alta performance usando fluxo de dados em memória."""
-    stream = io.BytesIO(file_bytes)  # <--- CORREÇÃO AQUI
+def extrair_dados_pypdf(file_bytes, pagina_inicio, pagina_fim):
+    """Extrai texto e metadados das imagens de cada página de forma leve."""
+    stream = io.BytesIO(file_bytes)
     reader = PdfReader(stream)
-    paginas_texto = []
+    paginas_dados = []
     
     for idx in range(pagina_inicio - 1, min(pagina_fim, len(reader.pages))):
         try:
             pagina = reader.pages[idx]
             texto = pagina.extract_text()
+            
+            # Conta quantas imagens existem nativamente na página
+            qtd_imagens = len(pagina.images)
+            
             if texto and texto.strip():
-                paginas_texto.append({"pagina": idx + 1, "conteudo": texto})
+                conteudo_txt = texto
             else:
-                paginas_texto.append({"pagina": idx + 1, "conteudo": f"[Página {idx + 1} vazia ou contém apenas imagens]"})
+                conteudo_txt = f"[Página {idx + 1} vazia ou composta estritamente por elementos gráficos]"
+                
+            paginas_dados.append({
+                "pagina": idx + 1, 
+                "conteudo": conteudo_txt,
+                "qtd_imagens": qtd_imagens
+            })
         except Exception:
-            paginas_texto.append({"pagina": idx + 1, "conteudo": f"[Erro ao ler a página {idx + 1}]"})
-    return paginas_texto
+            paginas_dados.append({
+                "pagina": idx + 1, 
+                "conteudo": f"[Erro ao ler a página {idx + 1}]",
+                "qtd_imagens": 0
+            })
+    return paginas_dados
+
+def extrair_imagens_da_pagina_atual(file_bytes, num_pagina):
+    """Extrai os bytes das imagens reais de uma única página sob demanda (Performance)."""
+    stream = io.BytesIO(file_bytes)
+    reader = PdfReader(stream)
+    imagens_extraidas = []
+    
+    try:
+        pagina = reader.pages[num_pagina - 1]
+        for img_file_object in pagina.images:
+            # Captura o nome da imagem e os bytes puros
+            imagens_extraidas.append({
+                "nome": img_file_object.name,
+                "bytes": img_file_object.data
+            })
+    except Exception:
+        pass
+    return imagens_extraidas
 
 def traduzir_texto_seguro(texto, idioma_destino="pt"):
     try:
@@ -52,7 +83,6 @@ def traduzir_texto_seguro(texto, idioma_destino="pt"):
         traduzido = []
         for para in paragrafos:
             if para.strip():
-                # Corta parágrafos absurdamente longos se houver erro de formatação no PDF
                 txt_limpo = para if len(para) < 4500 else para[:4500]
                 traduzido.append(tradutor.translate(txt_limpo))
             else:
@@ -63,10 +93,8 @@ def traduzir_texto_seguro(texto, idioma_destino="pt"):
 
 # --- FLUXO PRINCIPAL ---
 if uploaded_file is not None:
-    # Lemos os bytes do arquivo uma vez para alimentar as funções com cache estável
     file_bytes = uploaded_file.getvalue()
     
-    # 1. Conta as páginas usando a função cacheada ultra rápida
     total_paginas = analisar_pdf_rapido(file_bytes)
     st.sidebar.metric(label="Total de Páginas", value=total_paginas)
     
@@ -79,24 +107,21 @@ if uploaded_file is not None:
         if inicio <= total_paginas:
             divisao_blocos.append((inicio, fim))
 
-    # Interface de Seleção de Bloco
     st.sidebar.subheader("🧩 Escolha a Parte do Livro")
     opcoes_blocos = [f"Parte {i+1} (Págs. {b[0]} a {b[1]})" for i, b in enumerate(divisao_blocos)]
     bloco_selecionado_idx = st.sidebar.selectbox("Selecione:", range(len(opcoes_blocos)), format_func=lambda x: opcoes_blocos[x])
     
     p_inicio, p_fim = divisao_blocos[bloco_selecionado_idx]
     
-    # 2. Extração sob demanda apenas do bloco selecionado
-    @st.cache_data(show_spinner=f"Processando páginas {p_inicio} a {p_fim}...")
+    @st.cache_data(show_spinner=f"Mapeando páginas {p_inicio} a {p_fim}...")
     def obter_dados_bloco(bytes_data, inicio, fim):
-        return extrair_texto_pypdf(bytes_data, inicio, fim)
+        return extrair_dados_pypdf(bytes_data, inicio, fim)
     
     dados_bloco = obter_dados_bloco(file_bytes, p_inicio, p_fim)
     
     if dados_bloco:
         texto_completo_bloco = "\n\n".join([f"--- PÁGINA {p['pagina']} ---\n{p['conteudo']}" for p in dados_bloco])
         
-        # Opções de Tradução
         st.sidebar.subheader("🌐 Tradução")
         precisa_traduzir = st.sidebar.checkbox("Habilitar Tradução")
         
@@ -117,8 +142,7 @@ if uploaded_file is not None:
                         percentual = (index + 1) / total_itens
                         progresso_bar.progress(percentual, text=f"Traduzindo página {p['pagina']}...")
                         
-                        # Se a página não tiver texto extraível, pula a chamada da API
-                        if "vazia ou contém apenas imagens" in p["conteudo"]:
+                        if "[Página" in p["conteudo"] or "[Erro" in p["conteudo"]:
                             txt_traduzido = p["conteudo"]
                         else:
                             txt_traduzido = traduzir_texto_seguro(p["conteudo"], "pt")
@@ -140,22 +164,47 @@ if uploaded_file is not None:
             
             dados_pagina_atual = next(p for p in dados_bloco if p["pagina"] == pagina_atual)
             conteudo_pagina = dados_pagina_atual["conteudo"]
+            total_img_pag = dados_pagina_atual["qtd_imagens"]
             
             col1, col2 = st.columns(2)
             with col1:
                 st.markdown(f"#### 📄 Original - Página {pagina_atual}")
-                st.text_area(label="O", value=conteudo_pagina, height=500, key=f"o_{pagina_atual}", label_visibility="collapsed")
+                st.text_area(label="O", value=conteudo_pagina, height=450, key=f"o_{pagina_atual}", label_visibility="collapsed")
                 
             with col2:
                 st.markdown(f"#### 🇧🇷 Tradução - Página {pagina_atual}")
                 if precisa_traduzir:
-                    if modo_traducao == "Apenas Página Selecionada":
-                        texto_traduzido_pag = traduzir_texto_seguro(conteudo_pagina, "pt")
-                    else:
-                        texto_traduzido_pag = traduzir_texto_seguro(conteudo_pagina, "pt")
-                    st.text_area(label="T", value=texto_traduzido_pag, height=500, key=f"t_{pagina_atual}", label_visibility="collapsed")
+                    texto_traduzido_pag = traduzir_texto_seguro(conteudo_pagina, "pt")
+                    st.text_area(label="T", value=texto_traduzido_pag, height=450, key=f"t_{pagina_atual}", label_visibility="collapsed")
                 else:
                     st.info("Marque 'Habilitar Tradução' na barra lateral.")
+            
+            # --- SEÇÃO DE IMAGENS DA PÁGINA ---
+            st.markdown("---")
+            st.subheader(f"🖼️ Imagens da Página {pagina_atual}")
+            
+            if total_img_pag > 0:
+                st.caption(f"Detectamos {total_img_pag} imagem(ns) embarcada(s) nesta página. Renderizando abaixo:")
+                
+                # Busca os bytes reais apenas das imagens dessa página específica
+                lista_imagens = extrair_imagens_da_pagina_atual(file_bytes, pagina_atual)
+                
+                # Exibe as imagens lado a lado ou em grade dependendo de quantas forem
+                cols_img = st.columns(min(len(lista_imagens), 3))
+                for idx_img, img_dados in enumerate(lista_imagens):
+                    com_col = cols_img[idx_img % 3]
+                    with com_col:
+                        st.image(img_dados["bytes"], caption=f"Imagem: {img_dados['nome']}", use_container_width=True)
+                        # Oferece a opção de baixar a imagem isolada
+                        st.download_button(
+                            label=f"📥 Baixar {img_dados['nome']}",
+                            data=img_dados["bytes"],
+                            file_name=img_dados["nome"],
+                            mime="image/png",
+                            key=f"down_{pagina_atual}_{idx_img}"
+                        )
+            else:
+                st.info("Nenhuma imagem nativa foi detectada nesta página.")
                     
         with tab_download:
             st.subheader("📥 Baixar Arquivos de Texto (.txt)")
